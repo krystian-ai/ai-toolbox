@@ -24,8 +24,9 @@ $MCPServers = @{
         ExtraArgs = "--transport sse"
     }
     "testsprite" = @{
-        Command = "env API_KEY=API_KEY_PLACEHOLDER npx -y @testsprite/testsprite-mcp@latest"
+        Command = "npx -y @testsprite/testsprite-mcp@latest"
         EnvVar = "TESTSPRITE_API_KEY"
+        EnvVarTarget = "API_KEY"
         Description = "Test automation and validation"
         Category = "Testing"
     }
@@ -42,14 +43,16 @@ $MCPServers = @{
         Category = "Web Tools"
     }
     "brave-search" = @{
-        Command = "env BRAVE_API_KEY=API_KEY_PLACEHOLDER npx -y @modelcontextprotocol/server-brave-search"
+        Command = "npx -y @modelcontextprotocol/server-brave-search"
         EnvVar = "BRAVE_API_KEY"
+        EnvVarTarget = "BRAVE_API_KEY"
         Description = "Web search using Brave Search API"
         Category = "Search"
     }
     "firecrawl" = @{
-        Command = "env FIRECRAWL_API_KEY=API_KEY_PLACEHOLDER npx -y firecrawl-mcp"
+        Command = "npx -y firecrawl-mcp"
         EnvVar = "FIRECRAWL_API_KEY"
+        EnvVarTarget = "FIRECRAWL_API_KEY"
         Description = "Web scraping and content extraction"
         Category = "Web Tools"
     }
@@ -233,13 +236,17 @@ function Install-MCPServer {
     $command = $config.Command
     
     # Handle API key requirement
+    $envVarsToSet = @{}
     if ($config.EnvVar) {
         $apiKey = Get-APIKey -EnvVarName $config.EnvVar -ServerName $ServerName
         if (-not $apiKey) {
             Write-StyledText "✗ Skipped due to missing API key" "Warning"
             return $false
         }
-        $command = $command -replace "API_KEY_PLACEHOLDER", $apiKey
+        
+        # Determine the target environment variable name
+        $targetEnvVar = if ($config.EnvVarTarget) { $config.EnvVarTarget } else { $config.EnvVar }
+        $envVarsToSet[$targetEnvVar] = $apiKey
     }
     
     # Build the full command
@@ -247,21 +254,40 @@ function Install-MCPServer {
     if ($config.ExtraArgs) {
         $fullCommand += " $($config.ExtraArgs)"
     }
-    $fullCommand += " -- $command"
+    $fullCommand += " -- $($config.Command)"
     
     Write-StyledText "Executing: $fullCommand" "Highlight"
+    if ($envVarsToSet.Count -gt 0) {
+        $envInfo = ($envVarsToSet.GetEnumerator() | ForEach-Object { "$($_.Key)=***" }) -join ", "
+        Write-StyledText "Environment: $envInfo" "Info"
+    }
     
     # Execute the installation
     try {
-        $output = cmd /c $fullCommand 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-StyledText "✓ Successfully installed $ServerName" "Success"
-            return $true
+        # Set environment variables temporarily
+        $originalEnvVars = @{}
+        foreach ($envVar in $envVarsToSet.GetEnumerator()) {
+            $originalEnvVars[$envVar.Key] = [Environment]::GetEnvironmentVariable($envVar.Key)
+            [Environment]::SetEnvironmentVariable($envVar.Key, $envVar.Value)
         }
-        else {
-            Write-StyledText "✗ Failed to install $ServerName" "Error"
-            Write-Host "Error details: $output" -ForegroundColor Red
-            return $false
+        
+        try {
+            $output = cmd /c $fullCommand 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-StyledText "✓ Successfully installed $ServerName" "Success"
+                return $true
+            }
+            else {
+                Write-StyledText "✗ Failed to install $ServerName" "Error"
+                Write-Host "Error details: $output" -ForegroundColor Red
+                return $false
+            }
+        }
+        finally {
+            # Restore original environment variables
+            foreach ($envVar in $originalEnvVars.GetEnumerator()) {
+                [Environment]::SetEnvironmentVariable($envVar.Key, $envVar.Value)
+            }
         }
     }
     catch {

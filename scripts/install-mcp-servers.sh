@@ -20,11 +20,11 @@ readonly NC='\033[0m' # No Color
 declare -A MCP_SERVERS=(
     ["playwright"]="npx @playwright/mcp@latest||Browser automation and web testing|Web Automation"
     ["context7"]="https://mcp.context7.com/sse||Context management and search|Productivity|--transport sse"
-    ["testsprite"]="env API_KEY=API_KEY_PLACEHOLDER npx -y @testsprite/testsprite-mcp@latest|TESTSPRITE_API_KEY|Test automation and validation|Testing"
+    ["testsprite"]="npx -y @testsprite/testsprite-mcp@latest|TESTSPRITE_API_KEY|Test automation and validation|Testing|API_KEY"
     ["sequential-thinking"]="npx -y @modelcontextprotocol/server-sequential-thinking||Sequential thinking and reasoning|AI Enhancement"
     ["fetch"]="npx -y @kazuph/mcp-fetch||HTTP fetch and web requests|Web Tools"
-    ["brave-search"]="env BRAVE_API_KEY=API_KEY_PLACEHOLDER npx -y @modelcontextprotocol/server-brave-search|BRAVE_API_KEY|Web search using Brave Search API|Search"
-    ["firecrawl"]="env FIRECRAWL_API_KEY=API_KEY_PLACEHOLDER npx -y firecrawl-mcp|FIRECRAWL_API_KEY|Web scraping and content extraction|Web Tools"
+    ["brave-search"]="npx -y @modelcontextprotocol/server-brave-search|BRAVE_API_KEY|Web search using Brave Search API|Search|BRAVE_API_KEY"
+    ["firecrawl"]="npx -y firecrawl-mcp|FIRECRAWL_API_KEY|Web scraping and content extraction|Web Tools|FIRECRAWL_API_KEY"
     ["github"]="npx -y @github/github-mcp-server||GitHub repository management|Development"
 )
 
@@ -194,7 +194,7 @@ install_mcp_server() {
         return 1
     fi
     
-    IFS='|' read -r command env_var description category extra_args <<< "$server_config"
+    IFS='|' read -r command env_var description category extra_args target_env_var <<< "$server_config"
     
     echo
     log_info "Installing: $server_name"
@@ -202,13 +202,18 @@ install_mcp_server() {
     log_info "Description: $description"
     
     # Handle API key requirement
+    local api_key=""
+    local env_export=""
     if [[ -n "$env_var" ]]; then
-        local api_key
         if ! api_key=$(get_api_key "$env_var" "$server_name"); then
             log_warning "✗ Skipped due to missing API key"
             return 1
         fi
-        command="${command/API_KEY_PLACEHOLDER/$api_key}"
+        
+        # Determine target environment variable name
+        local target_var="${target_env_var:-$env_var}"
+        env_export="$target_var=\"$api_key\""
+        log_info "Environment: $target_var=***"
     fi
     
     # Build the full command
@@ -220,13 +225,23 @@ install_mcp_server() {
     
     log_highlight "Executing: $full_command"
     
-    # Execute the installation
-    if eval "$full_command"; then
-        log_success "✓ Successfully installed $server_name"
-        return 0
+    # Execute the installation with environment variable if needed
+    if [[ -n "$env_export" ]]; then
+        if env "$env_export" bash -c "$full_command"; then
+            log_success "✓ Successfully installed $server_name"
+            return 0
+        else
+            log_error "✗ Failed to install $server_name"
+            return 1
+        fi
     else
-        log_error "✗ Failed to install $server_name"
-        return 1
+        if eval "$full_command"; then
+            log_success "✓ Successfully installed $server_name"
+            return 0
+        else
+            log_error "✗ Failed to install $server_name"
+            return 1
+        fi
     fi
 }
 
